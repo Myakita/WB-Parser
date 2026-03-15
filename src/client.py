@@ -8,16 +8,16 @@ from src.logger import get_logger
 logger = get_logger("WBClient")
 
 class WBClientError(Exception):
-    """Base exception for Wildberries API client errors."""
+    """Базовое исключение для ошибок клиента Wildberries."""
     pass
 
 class WBClient:
-    """Asynchronous client for interacting with Wildberries API."""
+    """Асинхронный HTTP-клиент для взаимодействия с API Wildberries."""
     
     def __init__(self, timeout: int = 15):
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.session: Optional[aiohttp.ClientSession] = None
-        # Common headers to mimic a browser and avoid basic blocks
+        # Заголовки для имитации браузера
         self.headers = {
             "Accept": "*/*",
             "Accept-Language": "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -40,6 +40,18 @@ class WBClient:
         if self.session:
             await self.session.close()
 
+    def _check_session(self):
+        """Проверяет, инициализирована ли сессия."""
+        if not self.session:
+            raise RuntimeError("Сессия не инициализирована. Используйте 'async with WBClient() as client:'")
+
+    async def _fetch_json(self, url: str, params: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Выполняет запрос и возвращает JSON ответ."""
+        async with self.session.get(url, params=params) as response:
+            response.raise_for_status()
+            # Разрешаем любой тип контента (API WB может вернуть text/plain)
+            return await response.json(content_type=None)
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -48,21 +60,16 @@ class WBClient:
     )
     async def get(self, url: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Make a GET request to the given URL with retries on failure.
+        Выполняет GET запрос по URL с автоматическим повторением при ошибках.
         """
-        if not self.session:
-            raise RuntimeError("Client session is not initialized. Use 'async with WBClient() as client:'")
-            
-        logger.debug(f"Fetching {url} with params {params}")
+        self._check_session()
+        logger.debug(f"Запрос к {url} с параметрами {params}")
         
         try:
-            async with self.session.get(url, params=params) as response:
-                response.raise_for_status()
-                data = await response.json(content_type=None)
-                return data
+            return await self._fetch_json(url, params)
         except aiohttp.ClientResponseError as e:
-            logger.error(f"HTTP Error {e.status} for url {url}: {e.message}")
-            raise WBClientError(f"HTTP Error {e.status}: {e.message}") from e
+            logger.error(f"HTTP Ошибка {e.status} для URL {url}: {e.message}")
+            raise WBClientError(f"HTTP Ошибка {e.status}: {e.message}") from e
         except Exception as e:
-            logger.error(f"Request failed for {url}: {str(e)}")
+            logger.error(f"Ошибка запроса к {url}: {str(e)}")
             raise

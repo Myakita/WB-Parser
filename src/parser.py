@@ -9,7 +9,7 @@ from src.logger import get_logger
 logger = get_logger("WBParser")
 
 class WBParser:
-    """Main parser class for Wildberries"""
+    """Главный класс парсера для Wildberries"""
     
     SEARCH_URL = "https://search.wb.ru/exactmatch/ru/common/v4/search"
     
@@ -17,53 +17,56 @@ class WBParser:
         self.client = client
 
     async def search_products(self, query: str, max_pages: int = 1) -> List[ProductCard]:
-        """
-        Search for products by query across multiple pages.
-        """
+        """Ищет товары по запросу проходя по нескольким страницам."""
         all_products: List[ProductCard] = []
-        
-        logger.info(f"Starting search for '{query}', max pages: {max_pages}")
+        logger.info(f"Начинаем поиск по '{query}', максимум страниц: {max_pages}")
         
         for page in range(1, max_pages + 1):
-            logger.info(f"Parsing page {page} for query '{query}'")
+            logger.info(f"Парсинг страницы {page} для запроса '{query}'")
             page_products = await self._parse_search_page(query, page)
             
             if not page_products:
-                logger.info(f"No more products found on page {page}. Stopping.")
+                logger.info(f"Больше товаров на странице {page} нет. Остановка.")
                 break
                 
             all_products.extend(page_products)
-            
-            # Polymorphic delay between page requests to avoid bans
-            if page < max_pages:
-                await asyncio.sleep(1)
+            await self._random_delay_if_needed(page, max_pages)
                 
-        logger.info(f"Finished search. Total products found: {len(all_products)}")
+        logger.info(f"Поиск завершен. Найдено товаров: {len(all_products)}")
         return all_products
 
-    async def _parse_search_page(self, query: str, page: int) -> List[ProductCard]:
-        """
-        Parse a single page of search results.
-        """
-        params = {
+    async def _random_delay_if_needed(self, current_page: int, max_pages: int):
+        """Добавляет задержку между запросами для обхода простых блокировок."""
+        # Полиморфная задержка между страницами, чтобы не спамить
+        if current_page < max_pages:
+            await asyncio.sleep(1)
+
+    def _get_search_params(self, query: str, page: int) -> dict:
+        """Формирует параметры для GET запроса поиска"""
+        return {
             "query": query,
             "resultset": "catalog",
             "sort": "popular",
             "page": page,
             "suppressSpellcheck": "false",
-            "dest": "-1257786" # Default Moscow destination
+            "dest": "-1257786" # По умолчанию Москва
         }
-        
+
+    def _validate_response(self, data: dict) -> List[ProductCard]:
+        """Валидирует полученный JSON через Pydantic"""
         try:
-            data = await self.client.get(self.SEARCH_URL, params=params)
-            
-            # Validate and parse using pydantic models
             response = SearchResponse.model_validate(data)
             return response.data.products
-            
         except ValidationError as e:
-            logger.error(f"Failed to validate response data: {e}", exc_info=True)
+            logger.error(f"Не удалось валидировать ответ: {e}", exc_info=True)
             return []
+
+    async def _parse_search_page(self, query: str, page: int) -> List[ProductCard]:
+        """Парсит одну страницу поисковой выдачи."""
+        params = self._get_search_params(query, page)
+        try:
+            data = await self.client.get(self.SEARCH_URL, params=params)
+            return self._validate_response(data)
         except Exception as e:
-            logger.error(f"Failed to parse page {page}: {e}")
+            logger.error(f"Ошибка парсинга страницы {page}: {e}")
             return []
