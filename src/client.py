@@ -58,7 +58,7 @@ class WBClient:
         try:
             async with self.session.get(url, params=params) as response:
                 response.raise_for_status()
-                data = await response.json()
+                data = await response.json(content_type=None)
                 return data
         except aiohttp.ClientResponseError as e:
             logger.error(f"HTTP Error {e.status} for url {url}: {e.message}")

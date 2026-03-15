@@ -62,7 +62,7 @@ class WBParser:
             return response.data.products
             
         except ValidationError as e:
-            logger.error(f"Failed to validate response data: {e}")
+            logger.error(f"Failed to validate response data: {e}", exc_info=True)
             return []
         except Exception as e:
             logger.error(f"Failed to parse page {page}: {e}")
