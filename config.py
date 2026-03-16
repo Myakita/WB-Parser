@@ -3,3 +3,4 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 RETRY_MIN_WAIT = 2  # Минимальное ожидание в секундах
 RETRY_MAX_WAIT = 15 # Максимальное ожидание в секундах
 MAX_ATTEMPTS = 5    # Сколько раз пытаться достучаться до WB
+REQUESTS_PER_SECOND = 2  # Жесткий лимит: не более 2 запросов в секунду
