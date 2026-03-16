@@ -1,4 +1,7 @@
 curl_cffi==0.7.3
 tenacity==8.3.0
-pydantic==2.7.
-aiolimiter==1.1.01
+pydantic==2.7.1
+aiolimiter==1.1.0
+playwright==1.42.0
+playwright-stealth==1.0.6
+setuptools<70.0.0

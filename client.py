@@ -1,7 +1,5 @@
 import asyncio
 from curl_cffi.requests import AsyncSession
-from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
-from aiolimiter import AsyncLimiter
 from models import WBItem
 import config
 import logging
@@ -9,52 +7,60 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-class RateLimitError(Exception):
-    pass
-
 class WBClient:
     def __init__(self):
+        # На CDN можно не притворяться браузером так жестко, но оставим для надежности
         self.session = AsyncSession(impersonate="chrome120", headers={"User-Agent": config.USER_AGENT})
-        self.limiter = AsyncLimiter(config.REQUESTS_PER_SECOND, 1)
 
     async def close(self):
         await self.session.close()
 
-    @retry(
-        retry=retry_if_exception_type(RateLimitError),
-        wait=wait_exponential(multiplier=1, min=config.RETRY_MIN_WAIT, max=config.RETRY_MAX_WAIT),
-        stop=stop_after_attempt(config.MAX_ATTEMPTS),
-        reraise=True
-    )
-    async def fetch_item_data(self, article: int) -> WBItem | None:
-        url = f"https://card.wb.ru/cards/v1/detail?nm={article}"
-        
-        async with self.limiter: 
-            try:
-                response = await self.session.get(url)
-                
-                if response.status_code == 429:
-                    logger.warning(f"Артикул {article}: Поймали 429! Уходим в спячку...")
-                    raise RateLimitError("Too Many Requests")
-                    
-                response.raise_for_status()
-                
-                data = response.json()
-                
-                if "data" in data and "products" in data["data"] and len(data["data"]["products"]) > 0:
-                    raw_product = data["data"]["products"][0]
-                    item = WBItem(**raw_product)
-                    
-                    if "sizes" in raw_product and raw_product["sizes"]:
-                        price_data = raw_product["sizes"][0].get("price")
-                        if price_data and "total" in price_data:
-                             item.price = int(price_data["total"] / 100)
-                    
-                    return item
-                return None
+    async def _check_basket(self, url: str, basket_num: int) -> dict | None:
+        """Делает быстрый запрос к одной конкретной корзине"""
+        try:
+            response = await self.session.get(url, timeout=3)
+            if response.status_code == 200:
+                logger.debug(f"Успех! Товар найден в корзине basket-{basket_num:02d}")
+                return response.json()
+        except Exception:
+            pass
+        return None
 
-            except RateLimitError:
-                raise 
-            except Exception as e:
-                logger.error(f"Ошибка при парсинге {article}: {e}")
-                return None
+    async def fetch_item_data(self, article: int) -> WBItem | None:
+        vol = article // 100000
+        part = article // 1000
+        
+        tasks = []
+        # Генерируем ссылки для всех 35 возможных серверов WB
+        for i in range(1, 36):
+            url = f"https://basket-{i:02d}.wbbasket.ru/vol{vol}/part{part}/{article}/info/ru/card.json"
+            # Запускаем проверку
+            tasks.append(self._check_basket(url, i))
+            
+        # asyncio.as_completed возвращает результат ТОЙ корутины, которая завершилась первой
+        # Это магия: мы не ждем все 35, мы берем первый успешный ответ и идем дальше
+        data = None
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            if result is not None:
+                data = result
+                break # Нашли данные, прерываем остальные проверки!
+                
+        if not data:
+            logger.info(f"Артикул {article}: Не найден ни в одной из 35 корзин (404 везде).")
+            return None
+            
+        try:
+            # Парсим найденные данные
+            item = WBItem(
+                id=data.get("nm_id", article),
+                name=data.get("imt_name", "Без названия"),
+                brand=data.get("selling", {}).get("brand_name", "Неизвестный бренд"),
+                price=None, # Цену из статики мы не достанем
+                reviewRating=0.0,
+                feedbacks=0
+            )
+            return item
+        except Exception as e:
+            logger.error(f"Ошибка при парсинге JSON для {article}: {e}")
+            return None

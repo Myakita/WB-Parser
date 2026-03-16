@@ -25,5 +25,12 @@ async def main():
     await client.close()
     logger.info("Работа завершена.")
 
+# main.py (конец файла)
+import sys
+
 if __name__ == "__main__":
+    # Исправляем проблему с Event Loop на Windows
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        
     asyncio.run(main())
