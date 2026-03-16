@@ -10,17 +10,20 @@ from src.logger import get_logger
 
 logger = get_logger("Main")
 
-async def async_main(query: str, pages: int, export_csv: bool, export_db: bool):
+async def async_main(query: str, pages: int, export_csv: bool, export_db: bool, is_category: bool = False):
     logger.info("Initializing WB Parser...")
     
     async with WBClient() as client:
         parser = WBParser(client)
         
         try:
-            products = await parser.search_products(query, max_pages=pages)
+            if is_category:
+                products = await parser.get_category_products(int(query), max_pages=pages)
+            else:
+                products = await parser.search_products(query, max_pages=pages)
             
             if not products:
-                logger.warning("No products found for your query. Exiting.")
+                logger.warning("Товары не найдены. Если поиск блокируется, попробуйте режим категории (--category).")
                 return
                 
             if export_csv:
@@ -42,6 +45,7 @@ def main():
     parser.add_argument("-p", "--pages", type=int, default=1, help="Number of pages to parse (default: 1)")
     parser.add_argument("--no-csv", action="store_true", help="Disable CSV export")
     parser.add_argument("--no-db", action="store_true", help="Disable SQLite export")
+    parser.add_argument("--category", "-c", action="store_true", help="Использовать запрос как ID категории (для обхода 429)")
     
     args = parser.parse_args()
     
@@ -51,7 +55,7 @@ def main():
     
     try:
         # Run the async event loop
-        asyncio.run(async_main(args.query, args.pages, export_csv, export_db))
+        asyncio.run(async_main(args.query, args.pages, export_csv, export_db, args.category))
     except KeyboardInterrupt:
         logger.info("Parser stopped by user.")
 
